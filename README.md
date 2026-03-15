@@ -1,37 +1,68 @@
-#  AI-Driven Inventory & Demand Forecasting Dashboard
+# AI-Driven Inventory & Demand Dashboard
 
-A full-stack predictive analytics tool designed to identify "Dead Stock" (inventory idle for >90 days) and provide prescriptive discount recommendations to optimize retail margins.
+Full-stack dashboard for detecting dead stock from the UCI Online Retail dataset, scoring inventory health, and suggesting discount actions for recovery.
 
-##  The Problem
-Retailers lose billions annually to "Dead Stock"—inventory that takes up warehouse space without generating revenue. This project identifies these items before they become a total loss and suggests recovery strategies.
+## Stack
 
-##  Tech Stack
-* **Frontend:** Next.js 15 (App Router), Tailwind CSS, Tremor (Dashboard UI)
-* **Backend:** FastAPI (Python), SQLAlchemy, Pydantic
-* **AI/ML:** Scikit-learn (Random Forest Classifier), Pandas, NumPy
-* **Database:** PostgreSQL (Supabase/Neon)
+- Frontend: Next.js, Tailwind CSS, Tremor, Lucide
+- Backend: FastAPI, SQLAlchemy, Pandas, Scikit-learn
+- Database: PostgreSQL
 
-##  System Architecture
-1.  **Data Ingestion:** Processes the UCI Online Retail dataset (~500k records).
-2.  **Feature Engineering:** Calculates "Days Since Last Sale," "Stock Velocity," and "Price Elasticity."
-3.  **ML Inference:** A Random Forest model calculates a **Dead Stock Probability Score** (0.0 - 1.0).
-4.  **Prescriptive Logic:** The system maps probability scores to dynamic discount tiers (15%, 30%, etc.) to maximize clearance efficiency.
+## What It Does
 
-##  Key Features
-* **Probability Metric:** High-precision forecasting of which SKUs are likely to remain unsold.
-* **Dynamic Discount Engine:** Automated pricing suggestions based on AI confidence levels.
-* **KPI Overview:** Instant visibility into "At-Risk Revenue" and "Dead Stock Count."
+- Seeds an `inventory` table from the UCI Online Retail Excel dataset
+- Falls back to a bundled sample dataset when the UCI download is unavailable
+- Trains a Random Forest classifier on:
+  - `unit_price`
+  - `current_stock_level`
+  - `days_since_last_sale`
+- Flags dead stock as items unsold for more than 90 days
+- Stores model output in `stock_predictions`
+- Exposes `GET /inventory/health` with:
+  - `total_items`
+  - `dead_stock_count`
+  - `at_risk_revenue`
+  - top 15 highest-risk items
 
-##  Setup & Installation
+## Backend Setup
 
-### 1. Backend Setup
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+venv\Scripts\activate
 pip install -r requirements.txt
-python seed_data.py       # Seeds the database with UCI data
-python predict_stock.py   # Runs the initial AI inference
+copy .env.example .env
+alembic upgrade head
+python seed_data.py
+python predict_stock.py
 uvicorn main:app --reload
+```
 
-### 2. Frontend Setup
+For Supabase, set `DATABASE_URL` to your Supabase Postgres connection string before running `alembic upgrade head`.
+
+## Frontend Setup
+
+```bash
+cd frontend
+copy .env.example .env.local
+npm install
+npm run dev
+```
+
+## Required Environment Variables
+
+Backend:
+
+- `DATABASE_URL`
+- `INVENTORY_DATASET_URL` (optional; defaults to the UCI source)
+- `INVENTORY_DATASET_PATH` (optional; defaults to `backend/data/online_retail_sample.csv`)
+
+Frontend:
+
+- `NEXT_PUBLIC_API_BASE_URL`
+
+## API
+
+`GET /inventory/health`
+
+Returns aggregated KPI metrics and the top 15 SKUs ranked by dead-stock probability.

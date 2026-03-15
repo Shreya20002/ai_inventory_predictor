@@ -1,14 +1,19 @@
-from fastapi import FastAPI
-from sqlalchemy import create_engine
-import pandas as pd
+from datetime import UTC, datetime
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
-from dotenv import load_dotenv
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
-load_dotenv()
-app = FastAPI()
+from config import get_settings
+from db import SessionLocal, ensure_schema_ready
+from models import Inventory, StockPrediction
+from schemas import InventoryHealthItem, InventoryHealthResponse
 
-# Enable CORS for Next.js
+
+settings = get_settings()
+app = FastAPI(title=settings.api_title)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,23 +21,90 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DATABASE_URL)
 
-@app.get("/inventory/health")
-def get_inventory_health():
-    query = """
-    SELECT i.*, p.dead_stock_probability, p.suggested_discount 
-    FROM inventory i
-    JOIN stock_predictions p ON i.stock_code = p.stock_code
-    WHERE p.is_dead_stock = TRUE
-    ORDER BY p.dead_stock_probability DESC
-    LIMIT 15
-    """
-    df = pd.read_sql(query, engine)
-    
-    return {
-        "total_items": 4200, 
-        "dead_stock_count": len(df),
-        "items": df.to_dict(orient="records")
-    }
+def utc_now_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def startup() -> None:
+    ensure_schema_ready()
+
+
+@app.get("/healthz")
+def healthcheck() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/inventory/health", response_model=InventoryHealthResponse)
+def get_inventory_health(db: Session = Depends(get_db)) -> InventoryHealthResponse:
+    total_items = db.scalar(select(func.count()).select_from(Inventory)) or 0
+    dead_stock_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(StockPrediction)
+            .where(StockPrediction.is_dead_stock.is_(True))
+        )
+        or 0
+    )
+
+    at_risk_revenue = (
+        db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(Inventory.unit_price * Inventory.current_stock_level), 0
+                )
+            )
+            .join(StockPrediction, StockPrediction.stock_code == Inventory.stock_code)
+            .where(StockPrediction.is_dead_stock.is_(True))
+        )
+        or 0
+    )
+
+    latest_prediction_time = db.scalar(select(func.max(StockPrediction.last_updated)))
+
+    reference_now = utc_now_naive()
+    rows = db.execute(
+        select(Inventory, StockPrediction)
+        .join(StockPrediction, StockPrediction.stock_code == Inventory.stock_code)
+        .order_by(StockPrediction.dead_stock_probability.desc(), Inventory.stock_code.asc())
+        .limit(15)
+    ).all()
+
+    items = []
+    for inventory, prediction in rows:
+        days_since_last_sale = None
+        if inventory.last_sold_date is not None:
+            days_since_last_sale = max((reference_now - inventory.last_sold_date).days, 0)
+
+        items.append(
+            InventoryHealthItem(
+                stock_code=inventory.stock_code,
+                description=inventory.description,
+                category=inventory.category,
+                unit_price=float(inventory.unit_price),
+                current_stock_level=inventory.current_stock_level,
+                last_sold_date=inventory.last_sold_date,
+                days_since_last_sale=days_since_last_sale,
+                dead_stock_probability=prediction.dead_stock_probability,
+                is_dead_stock=prediction.is_dead_stock,
+                suggested_discount=prediction.suggested_discount,
+                inventory_value=float(inventory.unit_price) * inventory.current_stock_level,
+            )
+        )
+
+    return InventoryHealthResponse(
+        total_items=total_items,
+        dead_stock_count=dead_stock_count,
+        at_risk_revenue=float(at_risk_revenue),
+        generated_at=latest_prediction_time or reference_now,
+        items=items,
+    )
