@@ -146,7 +146,7 @@ export default function Dashboard() {
 
             <Card className="max-w-sm rounded-3xl border-0 bg-stone-950 text-stone-50 shadow-none">
               <Text className="text-stone-300">Last model refresh</Text>
-              <Metric className="mt-2 text-2xl">{generatedAtLabel}</Metric>
+              <Metric className="mt-2 text-2xl text-amber-300">{generatedAtLabel}</Metric>
             </Card>
           </div>
         </section>

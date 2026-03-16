@@ -12,6 +12,15 @@ def utc_now_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def derive_reference_date(last_sold_dates: pd.Series) -> pd.Timestamp:
+    latest_sale = pd.to_datetime(last_sold_dates).max()
+    if pd.isna(latest_sale):
+        return pd.Timestamp(utc_now_naive())
+
+    reference_date = latest_sale + pd.Timedelta(days=1)
+    return min(reference_date, pd.Timestamp(utc_now_naive()))
+
+
 def suggest_discount(probability: float) -> int:
     if probability > 0.8:
         return 30
@@ -41,7 +50,7 @@ def run_dead_stock_model() -> None:
         )
 
         df["last_sold_date"] = pd.to_datetime(df["last_sold_date"])
-        reference_date = pd.Timestamp(utc_now_naive())
+        reference_date = derive_reference_date(df["last_sold_date"])
         df["days_since_last_sale"] = (
             reference_date - df["last_sold_date"]
         ).dt.days.clip(lower=0)

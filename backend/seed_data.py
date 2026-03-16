@@ -41,7 +41,9 @@ def read_dataset(source: str) -> pd.DataFrame:
 
 
 def load_dataset() -> pd.DataFrame:
-    sources = [settings.inventory_dataset_url, settings.inventory_dataset_path]
+    # Prefer the bundled/local dataset so the app remains deterministic offline
+    # and does not silently switch to the historical UCI snapshot.
+    sources = [settings.inventory_dataset_path, settings.inventory_dataset_url]
     failures: list[str] = []
 
     for source in sources:
@@ -86,7 +88,7 @@ def build_inventory_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def seed_database() -> None:
-    print("Loading UCI Online Retail dataset...")
+    print("Loading inventory dataset...")
     raw_df = load_dataset()
     inventory_df = build_inventory_frame(raw_df)
     ensure_schema_ready()

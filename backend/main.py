@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,14 @@ app.add_middleware(
 
 def utc_now_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def derive_reference_now(max_last_sold_date: datetime | None) -> datetime:
+    if max_last_sold_date is None:
+        return utc_now_naive()
+
+    reference_now = max_last_sold_date + timedelta(days=1)
+    return min(reference_now, utc_now_naive())
 
 
 def get_db():
@@ -70,8 +78,9 @@ def get_inventory_health(db: Session = Depends(get_db)) -> InventoryHealthRespon
     )
 
     latest_prediction_time = db.scalar(select(func.max(StockPrediction.last_updated)))
+    max_last_sold_date = db.scalar(select(func.max(Inventory.last_sold_date)))
 
-    reference_now = utc_now_naive()
+    reference_now = derive_reference_now(max_last_sold_date)
     rows = db.execute(
         select(Inventory, StockPrediction)
         .join(StockPrediction, StockPrediction.stock_code == Inventory.stock_code)
